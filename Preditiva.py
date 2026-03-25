@@ -214,7 +214,7 @@ st.divider()
 def grafico_barra(data, coluna, cor, titulo):
 
     if data.empty:
-        st.info("Sem dados para os filtros selecionados")
+        st.info("Não há ordens de manutenção pendentes!")
         return
 
     base = data[coluna].value_counts().reset_index()
@@ -268,8 +268,41 @@ grafico_barra(
 
 st.divider()
 
-st.subheader("Tabela de Anomalias")
+st.divider()
 
-df['DATA'] = df['DATA'].dt.strftime("%d/%m/%Y")
+c1, c2 = st.columns([8,1])
 
-st.dataframe(df, use_container_width=True)
+c1.subheader("Tabela de Anomalias")
+
+# ===== DOWNLOAD XLSX =====
+
+from io import BytesIO
+
+output = BytesIO()
+
+df_download = df.copy()
+
+df_download['DATA'] = pd.to_datetime(
+    df_download['DATA'], errors='coerce'
+).dt.strftime("%d/%m/%Y")
+
+df_download.to_excel(output, index=False)
+
+c2.download_button(
+    label="Download ⬇️ XLSX",
+    data=output.getvalue(),
+    file_name="rota_filtrada.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=True
+)
+
+# ===== TABELA =====
+
+df['DATA'] = pd.to_datetime(
+    df['DATA'], errors='coerce'
+).dt.strftime("%d/%m/%Y")
+
+st.dataframe(
+    df,
+    use_container_width=True
+)
