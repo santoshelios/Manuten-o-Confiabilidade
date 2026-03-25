@@ -1,24 +1,20 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from io import BytesIO
 import requests
 
 st.set_page_config(
     layout="wide",
     page_title="Confiabilidade Rota Preditiva - Raízen",
-    page_icon="📡"
+    page_icon="🛠️"
 )
 
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+SUPABASE_URL = "https://kplsspnxemhzxfpzxbbl.supabase.co"
+SUPABASE_KEY = "sb_publishable_M-_WauseWVAmnb1SIzOmQg_VLcc-O2e"
 
-# =============================
-# LER SUPABASE PAGINADO
-# =============================
 
-@st.cache_data
-def ler_dados_supabase():
+@st.cache_data(ttl=60)
+def carregar_dados():
 
     headers = {
         "apikey": SUPABASE_KEY,
@@ -32,7 +28,6 @@ def ler_dados_supabase():
     while True:
 
         url = f"{SUPABASE_URL}/rest/v1/rota_preditiva?select=*&limit={limit}&offset={offset}"
-
         r = requests.get(url, headers=headers)
         lote = r.json()
 
@@ -45,67 +40,40 @@ def ler_dados_supabase():
     df = pd.DataFrame(dados)
 
     if not df.empty:
-
         df.columns = df.columns.str.upper()
-
-        df = df.rename(columns={
-            "DESCRICAO_LI": "DESCRIÇÃO_LI"
-        })
-
-        df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
+        df = df.rename(columns={"DESCRICAO_LI": "DESCRIÇÃO_LI"})
+        df["DATA"] = pd.to_datetime(df["DATA"], errors="coerce")
 
     return df
 
-
-# =============================
-# ENVIO SUPABASE BATCH + MERGE
-# =============================
 
 def enviar_para_supabase(df):
 
     df.columns = df.columns.str.upper().str.strip()
 
-    # GARANTE DEFEITO
-    for col in df.columns:
-        if "DEFEITO" in col:
-            df = df.rename(columns={col:"DEFEITO"})
-
     df_insert = df.rename(columns={
-        'DATA':'data',
-        'OM':'om',
-        'LI':'li',
-        'DESCRIÇÃO_LI':'descricao_li',
-        'SETOR':'setor',
-        'OFICINA':'oficina',
-        'CRITICIDADE':'criticidade',
-        'TEXTO_BREVE':'texto_breve',
-        'CAUSA':'causa',
-        'STATUS_PREDITIVA':'status_preditiva',
-        'DEFEITO':'defeito'
+        'DATA':'data','OM':'om','LI':'li','DESCRIÇÃO_LI':'descricao_li',
+        'SETOR':'setor','OFICINA':'oficina','CRITICIDADE':'criticidade',
+        'TEXTO_BREVE':'texto_breve','CAUSA':'causa',
+        'STATUS_PREDITIVA':'status_preditiva','DEFEITO':'defeito'
     })
 
-    colunas_banco = [
+    colunas = [
         "data","om","li","descricao_li","setor",
         "oficina","criticidade","texto_breve",
         "causa","status_preditiva","defeito"
     ]
 
-    df_insert = df_insert[colunas_banco]
-
-    df_insert = df_insert.drop_duplicates(
-        subset=["om","oficina"]
-    )
+    df_insert = df_insert[colunas]
 
     df_insert["data"] = pd.to_datetime(
-        df_insert["data"],
-        errors="coerce"
+        df_insert["data"], errors="coerce"
     ).dt.strftime("%Y-%m-%d")
 
     df_insert = df_insert.astype(object)
     df_insert = df_insert.where(pd.notnull(df_insert), None)
-    st.write(df_insert[['om','oficina','defeito']].head(20))
 
-    registros = df_insert.to_dict(orient="records")
+    registros = df_insert.to_dict("records")
 
     url = f"{SUPABASE_URL}/rest/v1/rota_preditiva?on_conflict=om,oficina"
 
@@ -116,94 +84,90 @@ def enviar_para_supabase(df):
         "Prefer": "resolution=merge-duplicates"
     }
 
-    batch_size = 500
-    total = len(registros)
+    r = requests.post(url, json=registros, headers=headers)
 
-    for i in range(0, total, batch_size):
-
-        lote = registros[i:i+batch_size]
-
-        r = requests.post(url, json=lote, headers=headers)
-
-        if r.status_code not in [200,201]:
-            st.error(f"Erro lote {i}: {r.text}")
-            return r.status_code
-
-    return 201
+    return r.status_code
 
 
-# =============================
 # HEADER
-# =============================
-
 c1, c2 = st.columns([8,1])
 c1.markdown("<h2>Raízen Bioparque Gasa</h2>", unsafe_allow_html=True)
 c2.image("logo_gasa.png", width=120)
 
 st.markdown("---")
-st.title("📡 Relatório Confiabilidade - Rotas Preditivas")
+st.title("⚙️ Relatório Confiabilidade - Rotas Preditivas")
 
-# =============================
-# CARREGA BANCO
-# =============================
-
-df = ler_dados_supabase()
-
-# =============================
-# UPLOAD
-# =============================
 
 with st.expander("📥 Upload nova carga (.xlsx)"):
 
     arquivo = st.file_uploader("Enviar planilha", type=["xlsx"])
 
-    if arquivo:
+    if arquivo is not None:
 
         df_upload = pd.read_excel(arquivo, sheet_name="STATUS")
 
-        st.info(f"{len(df_upload)} registros prontos para envio")
+        st.info(f"{len(df_upload)} registros prontos")
 
-        if st.button("🚀 Enviar carga para o banco"):
+        if st.button("🚀 Enviar carga para banco"):
 
             status = enviar_para_supabase(df_upload)
 
-            if status == 201:
+            if status in [200,201]:
                 st.success("Carga enviada! Atualize a página.")
-            else:
-                st.error("Erro ao enviar")
+                st.cache_data.clear()
 
-# =============================
-# SE VAZIO
-# =============================
 
-if df.empty:
-    st.warning("Banco sem dados")
+df_base = carregar_dados()
+
+if df_base.empty:
     st.stop()
 
-# =============================
-# SIDEBAR
-# =============================
+df = df_base.copy()
 
+# FILTROS TOPO
+c1, c2, c3 = st.columns(3)
+
+setor = c1.multiselect("Setor", sorted(df_base['SETOR'].dropna().unique()))
+oficina = c2.multiselect("Oficina", sorted(df_base['OFICINA'].dropna().unique()))
+
+periodo = c3.date_input(
+    "Período",
+    [df_base['DATA'].min(), df_base['DATA'].max()]
+)
+
+if setor:
+    df = df[df['SETOR'].isin(setor)]
+
+if oficina:
+    df = df[df['OFICINA'].isin(oficina)]
+
+if len(periodo) == 2:
+    df = df[
+        (df['DATA'] >= pd.to_datetime(periodo[0])) &
+        (df['DATA'] <= pd.to_datetime(periodo[1]))
+    ]
+
+# SIDEBAR
 st.sidebar.header("Filtros Engenharia")
 
 critic = st.sidebar.multiselect(
     "Criticidade",
-    sorted(df['CRITICIDADE'].dropna().unique())
+    sorted(df_base['CRITICIDADE'].dropna().unique())
 )
 
 status_pred = st.sidebar.multiselect(
     "Status Preditiva",
-    sorted(df['STATUS_PREDITIVA'].dropna().unique())
+    sorted(df_base['STATUS_PREDITIVA'].dropna().unique())
 )
 
 causa = st.sidebar.multiselect(
     "Causa",
-    sorted(df['CAUSA'].dropna().unique())
+    sorted(df_base['CAUSA'].dropna().unique())
 )
 
 defeito = st.sidebar.multiselect(
     "Defeito",
-    sorted(df['DEFEITO'].dropna().unique())
+    sorted(df_base['DEFEITO'].dropna().unique())
 )
 
 if critic:
@@ -218,70 +182,55 @@ if causa:
 if defeito:
     df = df[df['DEFEITO'].isin(defeito)]
 
-# =============================
-# FILTROS TOPO
-# =============================
 
-c1, c2, c3 = st.columns(3)
+# ===== KPI CORRIGIDO =====
 
-setor = c1.multiselect("Setor", sorted(df['SETOR'].unique()))
-oficina = c2.multiselect("Oficina", sorted(df['OFICINA'].unique()))
+df_kpi = df.copy()
 
-periodo = c3.date_input(
-    "Período",
-    [df['DATA'].min(), df['DATA'].max()]
-)
+total = len(df_kpi)
 
-if setor:
-    df = df[df['SETOR'].isin(setor)]
+executada = df_kpi[
+    df_kpi['STATUS_PREDITIVA'] == 'Manutenção Executada'
+].shape[0]
 
-if oficina:
-    df = df[df['OFICINA'].isin(oficina)]
+pendente = df_kpi[
+    df_kpi['STATUS_PREDITIVA'] == 'Pendente'
+].shape[0]
 
-if len(periodo)==2:
-    df = df[
-        (df['DATA']>=pd.to_datetime(periodo[0])) &
-        (df['DATA']<=pd.to_datetime(periodo[1]))
-    ]
+nao_conf = df_kpi[
+    df_kpi['STATUS_PREDITIVA'] == 'Não Conforme'
+].shape[0]
 
-# =============================
-# KPI
-# =============================
+k1, k2, k3, k4 = st.columns(4)
 
-total = len(df)
-executada = (df['STATUS_PREDITIVA']=="MANUTENÇÃO EXECUTADA").sum()
-pendente = (df['STATUS_PREDITIVA']=="PENDENTE").sum()
-nao_conf = (df['STATUS_PREDITIVA']=="NÃO CONFORME").sum()
-
-k1,k2,k3,k4 = st.columns(4)
-
-k1.metric("Total Anomalias", total)
-k2.metric("Executadas", executada)
+k1.metric("Total de Anomalias", total)
+k2.metric("Manutenção Executada", executada)
 k3.metric("Pendentes", pendente)
 k4.metric("Não Conforme", nao_conf)
 
 st.divider()
 
-# =============================
-# GRAFICOS
-# =============================
 
 def grafico_barra(data, coluna, cor, titulo):
 
+    if data.empty:
+        st.info("Sem dados para os filtros selecionados")
+        return
+
     base = data[coluna].value_counts().reset_index()
-    base.columns=[coluna,'QTD']
+    base.columns = [coluna,'QTD']
 
     chart = alt.Chart(base).mark_bar(color=cor).encode(
         x=alt.X(f"{coluna}:N", sort='-y', axis=alt.Axis(labelAngle=-45)),
-        y='QTD'
+        y='QTD:Q',
+        tooltip=['QTD']
     )
 
-    text = chart.mark_text(dy=-5).encode(text='QTD')
-
     st.subheader(titulo)
-    st.altair_chart(chart+text, use_container_width=True)
+    st.altair_chart(chart, use_container_width=True)
 
-g1,g2 = st.columns(2)
+
+g1, g2 = st.columns(2)
 
 with g1:
     grafico_barra(df,'SETOR','#5E7F73','Ranking por Setor')
@@ -291,7 +240,7 @@ with g2:
 
 st.divider()
 
-g3,g4 = st.columns(2)
+g3, g4 = st.columns(2)
 
 with g3:
     grafico_barra(df,'STATUS_PREDITIVA','#3E5F55','Status Preditiva')
@@ -301,34 +250,26 @@ with g4:
 
 st.divider()
 
-backlog = df[df['STATUS_PREDITIVA'].isin(['PENDENTE','NÃO CONFORME'])]
 
-grafico_barra(backlog,'OFICINA','#3E5F55','Backlog por Oficina')
+# ===== BACKLOG CORRIGIDO =====
+
+backlog = df_kpi[
+    df_kpi['STATUS_PREDITIVA'].isin(
+        ['Pendente','Não Conforme']
+    )
+]
+
+grafico_barra(
+    backlog,
+    'OFICINA',
+    '#3E5F55',
+    'Backlog por Oficina'
+)
 
 st.divider()
 
-df['DATA']=df['DATA'].dt.strftime('%d/%m/%Y')
+st.subheader("Tabela de Anomalias")
 
-c1,c2 = st.columns([6,2])
+df['DATA'] = df['DATA'].dt.strftime("%d/%m/%Y")
 
-c1.subheader("Tabela de Anomalias")
-
-output = BytesIO()
-df.to_excel(output,index=False)
-output.seek(0)
-
-c2.download_button(
-    "⬇️ Baixar Base Filtrada",
-    data=output,
-    file_name="rota_filtrada.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    use_container_width=True
-)
-
-cols = [
-    'DATA','OM','LI','DESCRIÇÃO_LI','SETOR',
-    'OFICINA','CRITICIDADE','TEXTO_BREVE',
-    'CAUSA','STATUS_PREDITIVA','DEFEITO'
-]
-
-st.dataframe(df[cols], use_container_width=True)
+st.dataframe(df, use_container_width=True)
