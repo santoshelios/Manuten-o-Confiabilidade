@@ -148,7 +148,7 @@ if len(periodo) == 2:
     ]
 
 # SIDEBAR
-st.sidebar.header("Filtros Engenharia")
+st.sidebar.header("Filtros Confiabilidade")
 
 critic = st.sidebar.multiselect(
     "Criticidade",
