@@ -91,7 +91,7 @@ def enviar_para_supabase(df):
 
 # HEADER
 c1, c2 = st.columns([8,1])
-c1.markdown("<h2>Raízen Bioparque Gasa</h2>", unsafe_allow_html=True)
+c1.markdown("<h2>EAB Industria Bioparque Gasa</h2>", unsafe_allow_html=True)
 c2.image("logo_gasa.png", width=120)
 
 st.markdown("---")
@@ -266,7 +266,6 @@ grafico_barra(
     'Backlog por Oficina'
 )
 
-st.divider()
 
 st.divider()
 
