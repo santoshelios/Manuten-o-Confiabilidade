@@ -3,6 +3,7 @@ import pandas as pd
 import altair as alt
 import requests
 from datetime import datetime
+import unicodedata
 
 st.set_page_config(
     page_title="Rota Preditiva",
@@ -10,72 +11,66 @@ st.set_page_config(
     layout="wide"
 )
 
+# ================= LOGIN =================
+USUARIOS = {
+    "admin": "1234",
+    "analista": "1234"
+}
+
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+    st.session_state.usuario = None
+
+if "filtro_defeito_click" not in st.session_state:
+    st.session_state.filtro_defeito_click = None
 
 # ================= CSS =================
-
-st.markdown("""
+st.markdown(f"""
 <style>
 
-/* SIDEBAR */
-section[data-testid="stSidebar"]{
+section[data-testid="stSidebar"]{{
     background-color:#F4F7F3;
-}
+}}
 
-section[data-testid="stSidebar"] label{
+section[data-testid="stSidebar"] label{{
     color:#5B7F4F;
     font-weight:600;
-}
+}}
 
-/* BOTÃO */
-div[data-testid="stSidebar"] button {
-    background: linear-gradient(135deg, #5B7F4F, #7FA36B);
-    color: white;
-    border-radius: 10px;
-    border: none;
-    padding: 10px 12px;
-    font-weight: 600;
-    transition: all 0.25s ease;
-    box-shadow: 0px 3px 6px rgba(0,0,0,0.1);
-}
-
-div[data-testid="stSidebar"] button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0px 6px 12px rgba(0,0,0,0.15);
-    background: linear-gradient(135deg, #4E6F44, #6D8F5A);
-}
-
-div[data-testid="stSidebar"] button:active {
-    transform: scale(0.98);
-}
-
-/* ===== KPI CARDS ===== */
-.kpi-card {
-    background: #FFFFFF;
-    border: 1px solid #E6ECE8;
-    border-radius: 12px;
-    padding: 16px 12px;
+.kpi-card {{
+    background: linear-gradient(135deg, #FFFFFF, #F7F9F8);
+    border-radius: 18px;
+    padding: 20px;
     text-align: center;
-    box-shadow: 0px 3px 8px rgba(0,0,0,0.04);
-    transition: all 0.2s ease;
-}
+    box-shadow: 0px 8px 20px rgba(0,0,0,0.08);
+    border: 1px solid #E6ECE8;
+    transition: all 0.25s ease;
+}}
 
-.kpi-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0px 6px 14px rgba(0,0,0,0.08);
-}
+.kpi-card:hover {{
+    transform: translateY(-5px);
+    box-shadow: 0px 12px 25px rgba(0,0,0,0.12);
+}}
 
-.kpi-title {
-    font-size: 13px;
-    color: #6B7C75;
+.kpi-title {{
+    font-size: 12px;
+    color: #7A8B85;
     font-weight: 600;
-    margin-bottom: 6px;
-}
+    margin-bottom: 8px;
+}}
 
-.kpi-value {
-    font-size: 28px;
+.kpi-value {{
+    font-size: 34px;
     font-weight: 700;
-    color: #2F3E46;
-}
+}}
+
+[data-testid="stAltairChart"] {{
+    background: #FFFFFF;
+    border-radius: 16px;
+    padding: 10px;
+    box-shadow: 0px 6px 16px rgba(0,0,0,0.08);
+    border: 1px solid #E6ECE8;
+}}
 
 </style>
 """, unsafe_allow_html=True)
@@ -83,47 +78,169 @@ div[data-testid="stSidebar"] button:active {
 SUPABASE_URL="https://kplsspnxemhzxfpzxbbl.supabase.co"
 SUPABASE_KEY="sb_publishable_M-_WauseWVAmnb1SIzOmQg_VLcc-O2e"
 
-# ================= LIMPAR FILTROS =================
+# ================= FUNÇÕES =================
+def normalizar_coluna(col):
+    col = unicodedata.normalize('NFKD', col).encode('ASCII','ignore').decode('ASCII')
+    return col.lower().replace(" ","_")
 
-with st.sidebar:
-    st.markdown("### ⚙️ Controles")
-    if st.button("🔄 LIMPAR TODOS FILTROS"):
-        st.cache_data.clear()
-        st.rerun()
+def enviar(df):
+    url = f"{SUPABASE_URL}/rest/v1/rota_preditiva"
 
-# ================= FUNÇÃO CARREGAR =================
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    # 🔥 DELETE FORÇADO (AGORA FUNCIONA DE VERDADE)
+    delete_url = f"{SUPABASE_URL}/rest/v1/rota_preditiva?id=gt.0"
+
+    headers_delete = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Prefer": "return=minimal"
+    }
+
+    requests.delete(delete_url, headers=headers_delete)
+
+    # 🔄 PREPARA DADOS (MANTIDO IGUAL)
+    df = df.astype(object).where(pd.notnull(df), None)
+    df.columns = [normalizar_coluna(c) for c in df.columns]
+
+    # 🔥 LIMPEZA FORTE (CORRIGIDA)
+    if "om" in df.columns and "oficina" in df.columns:
+
+        df["om"] = df["om"].astype(str).str.strip()
+        df["oficina"] = df["oficina"].astype(str).str.strip().str.upper()
+
+        df = df.drop_duplicates(subset=["om","oficina"], keep="last")
+
+    if "data" in df.columns:
+        df["data"] = pd.to_datetime(df["data"]).dt.strftime("%Y-%m-%d")
+
+    # 🚀 INSERT LIMPO
+    r = requests.post(url, json=df.to_dict("records"), headers=headers)
+
+    return r.status_code, r.text
+
+    # 🔥 LIMPA TABELA (FULL LOAD)
+    requests.delete(url, headers=headers)
+
+  # 🔄 PREPARA DADOS
+    df = df.astype(object).where(pd.notnull(df), None)
+    df.columns = [normalizar_coluna(c) for c in df.columns]
+
+# 🔥 LIMPEZA FORTE (resolve seu erro)
+    if "om" in df.columns and "oficina" in df.columns:
+
+    # padroniza
+        df["om"] = df["om"].astype(str).str.strip()
+        df["oficina"] = df["oficina"].astype(str).str.strip().str.upper()
+
+    # remove duplicados REAL
+    df = df.drop_duplicates(subset=["om","oficina"], keep="last")
+
+    # 🔍 validação extra (pra você ver o problema)
+    duplicados = df[df.duplicated(subset=["om","oficina"], keep=False)]
+
+    if not duplicados.empty:
+        st.error("⚠️ Duplicados encontrados após limpeza")
+        st.dataframe(duplicados)
+        return 400, "Duplicados persistentes"
+
+    # 🧠 VALIDAÇÃO EXTRA (DEBUG)
+    duplicados = df[df.duplicated(subset=["om","oficina"], keep=False)]
+    if not duplicados.empty:
+        st.error("⚠️ Ainda existem duplicados na planilha!")
+        st.dataframe(duplicados)
+        return 400, "Duplicados encontrados"
+
+    if "data" in df.columns:
+        df["data"] = pd.to_datetime(df["data"]).dt.strftime("%Y-%m-%d")
+
+    # 🚀 INSERE NOVAMENTE
+    r = requests.post(url, json=df.to_dict("records"), headers=headers)
+
+    return r.status_code, r.text
 
 @st.cache_data(ttl=60)
 def carregar():
-    headers={
-        "apikey":SUPABASE_KEY,
-        "Authorization":f"Bearer {SUPABASE_KEY}"
-    }
-
-    dados=[]
-    offset=0
+    headers={"apikey":SUPABASE_KEY,"Authorization":f"Bearer {SUPABASE_KEY}"}
+    dados=[]; offset=0
 
     while True:
         url=f"{SUPABASE_URL}/rest/v1/rota_preditiva?select=*&limit=1000&offset={offset}"
-        r=requests.get(url,headers=headers)
-        lote=r.json()
-
-        if not lote:
-            break
-
-        dados.extend(lote)
-        offset+=1000
+        r=requests.get(url,headers=headers).json()
+        if not r: break
+        dados.extend(r); offset+=1000
 
     df=pd.DataFrame(dados)
-
     df.columns=df.columns.str.upper()
-    df["DATA"]=pd.to_datetime(df["DATA"],errors="coerce")
-
+    df["DATA"]=pd.to_datetime(df["DATA"])
+    df["SAFRA"] = df["DATA"].dt.year.astype(str).str[-2:] + "/" + (df["DATA"].dt.year+1).astype(str).str[-2:]
     return df
 
-# ================= HEADER =================
+# ================= SIDEBAR =================
+with st.sidebar:
 
-c_title, c_logo = st.columns([8, 1])
+    st.markdown("## 🔐 Acesso")
+
+    if not st.session_state.logado:
+
+        user = st.text_input("Usuário")
+        senha = st.text_input("Senha", type="password")
+
+        if st.button("Entrar no sistema"):
+            if user in USUARIOS and USUARIOS[user] == senha:
+                st.session_state.logado = True
+                st.session_state.usuario = user
+                st.rerun()
+            else:
+                st.error("Usuário ou senha inválido")
+
+    else:
+        st.success(f"Usuário ativo: {st.session_state.usuario}")
+
+        if st.button("Sair do sistema"):
+            st.session_state.logado = False
+            st.rerun()
+
+        st.markdown("### ⚙️ Controles")
+
+        if st.button("🔄 LIMPAR TODOS FILTROS"):
+            st.cache_data.clear()
+            st.rerun()
+
+        st.markdown("---")
+
+        with st.expander("📤 Upload de Dados"):
+            arquivo = st.file_uploader("Planilha (.xlsx)", type=["xlsx"])
+
+            if arquivo:
+                df_up = pd.read_excel(arquivo, sheet_name="STATUS")
+                df_up.columns = df_up.columns.str.replace("Satus_Usuário", "Status_Usuário")
+
+                st.success(f"{len(df_up)} registros carregados")
+
+                confirmar = st.checkbox("⚠️ Confirmar substituição total dos dados")
+
+                if st.button("🚀 Enviar carga") and confirmar:
+                    status, msg = enviar(df_up)
+                    st.write("Status:", status)
+
+                    if status in [200, 201]:
+                        st.success("Carga enviada com sucesso")
+                    else:
+                        st.error(f"Erro:\n{msg}")
+
+# ================= DADOS =================
+df=carregar()
+if df.empty: st.stop()
+
+st.caption(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+
+# ================= HEADER =================
+c_title, c_logo = st.columns([8,1])
 
 with c_title:
     st.markdown("""
@@ -134,67 +251,37 @@ with c_title:
 with c_logo:
     st.image("logo.png", width=70)
 
-df=carregar()
-
-if df.empty:
-    st.stop()
-
-# ================= FILTROS TOPO =================
-
+# ================= FILTROS =================
 c1,c2,c3=st.columns(3)
 
 setor=c1.multiselect("Setor",sorted(df.SETOR.dropna().unique()))
 oficina=c2.multiselect("Oficina",sorted(df.OFICINA.dropna().unique()))
-periodo=c3.date_input("Período",[df.DATA.min(),df.DATA.max()])
+safra=c3.multiselect("Safra",sorted(df.SAFRA.unique()),default=[sorted(df.SAFRA.unique())[-1]])
 
-if setor:
-    df=df[df.SETOR.isin(setor)]
+if setor: df=df[df.SETOR.isin(setor)]
+if oficina: df=df[df.OFICINA.isin(oficina)]
+if safra: df=df[df.SAFRA.isin(safra)]
 
-if oficina:
-    df=df[df.OFICINA.isin(oficina)]
+# ================= FILTROS AVANÇADOS =================
+if st.session_state.logado:
 
-if len(periodo)==2:
-    df=df[(df.DATA>=pd.to_datetime(periodo[0]))&(df.DATA<=pd.to_datetime(periodo[1]))]
+    st.sidebar.markdown("### 🔎 Filtros")
 
-# ================= SIDEBAR =================
+    status_user=st.sidebar.multiselect("Status Usuário",sorted(df.STATUS_USUARIO.dropna().unique()))
+    efet=st.sidebar.multiselect("Efetuada",sorted(df.EFETUADA_MANUTENCAO.dropna().unique()))
+    defeito=st.sidebar.multiselect("Defeito",sorted(df.DEFEITO.dropna().unique()))
+    causa=st.sidebar.multiselect("Causa",sorted(df.CAUSA.dropna().unique()))
+    critic=st.sidebar.multiselect("Criticidade",sorted(df.CRITICIDADE.dropna().unique()))
+    stat_pred=st.sidebar.multiselect("Status Preditiva",sorted(df.STATUS_PREDITIVA.dropna().unique()))
 
-st.sidebar.markdown("### 🔎 Filtros")
-
-status_user=st.sidebar.multiselect("Status Usuário",sorted(df.STATUS_USUARIO.dropna().unique()))
-
-
-efet=st.sidebar.multiselect("Efetuada",sorted(df.EFETUADA_MANUTENCAO.dropna().unique()))
-
-
-defeito=st.sidebar.multiselect("Defeito",sorted(df.DEFEITO.dropna().unique()))
-
-causa=st.sidebar.multiselect("Causa",sorted(df.CAUSA.dropna().unique()))
-
-critic=st.sidebar.multiselect("Criticidade",sorted(df.CRITICIDADE.dropna().unique()))
-
-stat_pred=st.sidebar.multiselect("Status Preditiva",sorted(df.STATUS_PREDITIVA.dropna().unique()))
-
-
-if status_user:
-    df=df[df.STATUS_USUARIO.isin(status_user)]
-
-if efet:
-    df=df[df.EFETUADA_MANUTENCAO.isin(efet)]
-
-if defeito:
-    df=df[df.DEFEITO.isin(defeito)]
-
-if causa:
-    df=df[df.CAUSA.isin(causa)]
-
-if critic:
-    df=df[df.CRITICIDADE.isin(critic)]
-
-if stat_pred:
-    df=df[df.STATUS_PREDITIVA.isin(stat_pred)]
+    if status_user: df=df[df.STATUS_USUARIO.isin(status_user)]
+    if efet: df=df[df.EFETUADA_MANUTENCAO.isin(efet)]
+    if defeito: df=df[df.DEFEITO.isin(defeito)]
+    if causa: df=df[df.CAUSA.isin(causa)]
+    if critic: df=df[df.CRITICIDADE.isin(critic)]
+    if stat_pred: df=df[df.STATUS_PREDITIVA.isin(stat_pred)]
 
 # ================= KPI =================
-
 total=len(df)
 executadas=(df.STATUS_PREDITIVA=="Manutenção Executada").sum()
 pendentes=(df.STATUS_PREDITIVA=="Pendente").sum()
@@ -203,145 +290,134 @@ nao_conf=(df.STATUS_PREDITIVA=="Não Conforme").sum()
 exec_real = round(executadas/(executadas+pendentes+nao_conf)*100,1) if (executadas+pendentes+nao_conf)>0 else 0
 
 back=df[df.STATUS_PREDITIVA.isin(["Pendente","Não Conforme"])]
-aging=(datetime.now()-back["DATA"]).dt.days
-back_30=(aging>30).sum()
 
-# ===== FUNÇÃO CARD =====
-
-def card(titulo, valor):
+def card(titulo, valor, cor, icone):
     return f"""
     <div class="kpi-card">
-        <div class="kpi-title">{titulo}</div>
-        <div class="kpi-value">{valor}</div>
+        <div class="kpi-title">{icone} {titulo}</div>
+        <div class="kpi-value" style="color:{cor};">{valor}</div>
     </div>
     """
 
 k1,k2,k3,k4,k5,k6=st.columns(6)
 
-with k1:
-    st.markdown(card("Total", total), unsafe_allow_html=True)
-
-with k2:
-    st.markdown(card("Executadas", executadas), unsafe_allow_html=True)
-
-with k3:
-    st.markdown(card("Pendentes", pendentes), unsafe_allow_html=True)
-
-with k4:
-    st.markdown(card("Não Conforme", nao_conf), unsafe_allow_html=True)
-
-with k5:
-    st.markdown(card("Execução Real %", f"{exec_real}%"), unsafe_allow_html=True)
-
-with k6:
-    st.markdown(card("Backlog >30 dias", back_30), unsafe_allow_html=True)
+k1.markdown(card("Total", total, "#2F3E46", "📊"), unsafe_allow_html=True)
+k2.markdown(card("Executadas", executadas, "#2E7D32", "✅"), unsafe_allow_html=True)
+k3.markdown(card("Pendentes", pendentes, "#F9A825", "⏳"), unsafe_allow_html=True)
+k4.markdown(card("Não Conforme", nao_conf, "#C62828", "⚠️"), unsafe_allow_html=True)
+k5.markdown(card("Execução %", f"{exec_real}%", "#1565C0", "📈"), unsafe_allow_html=True)
+k6.markdown(card("Backlog", len(back), "#6A1B9A", "🔥"), unsafe_allow_html=True)
 
 st.divider()
 
 # ================= RANKINGS =================
-
 r1,r2=st.columns(2)
+
+def add_labels(chart):
+    return chart + chart.mark_text(
+        dy=-8,
+        color="#263238",
+        fontSize=13,
+        fontWeight="bold"
+    ).encode(text="QTD:Q")
 
 with r1:
     base=df["SETOR"].value_counts().reset_index()
     base.columns=["SETOR","QTD"]
 
-    chart=alt.Chart(base).mark_bar(
+    chart = alt.Chart(base).mark_bar(
         color="#5B7F4F",
         cornerRadiusTopLeft=8,
         cornerRadiusTopRight=8
     ).encode(
         x=alt.X("SETOR:N",sort="-y",axis=alt.Axis(labelAngle=-45)),
         y="QTD:Q"
-    ).properties(height=300,title="Ranking Setor")
+    )
 
-    st.altair_chart(chart,use_container_width=True)
+    st.altair_chart(add_labels(chart).properties(title="Ranking por Setor"), use_container_width=True)
 
 with r2:
     base=df["OFICINA"].value_counts().reset_index()
     base.columns=["OFICINA","QTD"]
 
-    chart=alt.Chart(base).mark_bar(
+    chart = alt.Chart(base).mark_bar(
         color="#92A197",
         cornerRadiusTopLeft=8,
         cornerRadiusTopRight=8
     ).encode(
-        x=alt.X("OFICINA:N",sort="-y",axis=alt.Axis(labelAngle=0)),
+        x=alt.X("OFICINA:N", sort="-y", axis=alt.Axis(labelAngle=0)),
         y="QTD:Q"
-    ).properties(height=300,title="Ranking Oficina")
+    )
 
-    st.altair_chart(chart,use_container_width=True)
+    st.altair_chart(add_labels(chart).properties(title="Ranking por Oficina"), use_container_width=True)
 
 st.divider()
 
 # ================= BACKLOG =================
-
 b1,b2=st.columns(2)
 
 with b1:
     base=back["OFICINA"].value_counts().reset_index()
     base.columns=["OFICINA","QTD"]
 
-    chart=alt.Chart(base).mark_bar(
+    chart = alt.Chart(base).mark_bar(
         color="#92A197",
         cornerRadiusTopLeft=8,
         cornerRadiusTopRight=8
     ).encode(
-        x=alt.X("OFICINA:N",sort="-y",axis=alt.Axis(labelAngle=0)),
+        x=alt.X("OFICINA:N", sort="-y", axis=alt.Axis(labelAngle=0)),
         y="QTD:Q"
-    ).properties(height=320,title="Backlog")
+    )
 
-    st.altair_chart(chart,use_container_width=True)
+    st.altair_chart(add_labels(chart).properties(title="Backlog por Oficina"), use_container_width=True)
 
 with b2:
+    top_n = st.slider("Quantidade de defeitos no ranking",5,20,10)
 
-    # PRIORIDADE: backlog
-    if len(back) > 0:
-        tabela = back.copy()
-    else:
-        tabela = df.copy()
+    base=df["DEFEITO"].value_counts().reset_index()
+    base.columns=["DEFEITO","QTD"]
+    base=base.head(top_n)
 
-    tabela["AGING"] = (datetime.now() - tabela["DATA"]).dt.days
+    base["COR"] = ["#2E7D32" if i==0 else "#A5D6A7" for i in range(len(base))]
 
-    # ICONES
-    def status_icon(x):
-        if x == "Manutenção Executada":
-            return "🟢"
-        elif x == "Não Conforme":
-            return "🔴"
-        else:
-            return "🟡"
+    chart = alt.Chart(base).mark_bar(
+        cornerRadiusTopLeft=8,
+        cornerRadiusBottomLeft=8
+    ).encode(
+        y=alt.Y("DEFEITO:N",sort="-x",axis=alt.Axis(labelLimit=300)),
+        x="QTD:Q",
+        color=alt.Color("COR:N", scale=None)
+    )
 
-    def critic_icon(x):
-        if x == "A":
-            return "🔴 Crítico"
-        elif x == "B":
-            return "🟡 Alerta"
-        else:
-            return "🟢 Normal"
+    text = chart.mark_text(
+        align="left",
+        dx=6,
+        fontSize=13,
+        color="#263238",
+        fontWeight="bold"
+    ).encode(text="QTD:Q")
 
-    tabela["STATUS"] = tabela["STATUS_PREDITIVA"].apply(status_icon)
-    tabela["PRIORIDADE"] = tabela["CRITICIDADE"].apply(critic_icon)
-
-    tabela = tabela[[
-        "OM",
-        "STATUS",
-        "OFICINA",
-        "DESCRICAO_LI",        
-        "STATUS_PREDITIVA",
-        "PRIORIDADE",
-        "AGING"
-    ]]
-
-    if "CRITICIDADE" in tabela.columns:
-        tabela = tabela.sort_values(by=["CRITICIDADE","AGING"], ascending=[True, False])
-    else:
-        tabela = tabela.sort_values(by=["AGING"], ascending=[False])
-
-    st.dataframe(tabela, use_container_width=True, height=320)
+    st.altair_chart((chart + text).properties(height=400,title="Ranking de Defeitos"), use_container_width=True)
 
 st.divider()
 
-df["DATA"]=df["DATA"].dt.strftime("%d/%m/%Y")
+# ================= TABELA =================
+tabela=df.copy()
 
-st.dataframe(df,use_container_width=True)
+tabela["AGING"]=(datetime.now()-tabela["DATA"]).dt.days
+
+tabela["STATUS"]=tabela["STATUS_PREDITIVA"].apply(lambda x:
+    "🟢" if x=="Manutenção Executada"
+    else "🔴" if x=="Não Conforme"
+    else "🟡")
+
+tabela["PRIORIDADE"]=tabela["CRITICIDADE"].apply(lambda x:
+    "🔴 Crítico" if x=="A"
+    else "🟡 Alerta" if x=="B"
+    else "🟢 Normal")
+
+tabela=tabela[
+    ["OM","STATUS","OFICINA","DESCRICAO_LI","STATUS_PREDITIVA","DEFEITO","PRIORIDADE","AGING"]
+]
+
+st.dataframe(tabela,use_container_width=True)
