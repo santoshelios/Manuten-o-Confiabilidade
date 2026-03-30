@@ -78,6 +78,8 @@ section[data-testid="stSidebar"] label{{
 SUPABASE_URL="https://kplsspnxemhzxfpzxbbl.supabase.co"
 SUPABASE_KEY="sb_publishable_M-_WauseWVAmnb1SIzOmQg_VLcc-O2e"
 
+
+
 # ================= FUNÇÕES =================
 def normalizar_coluna(col):
     col = unicodedata.normalize('NFKD', col).encode('ASCII','ignore').decode('ASCII')
@@ -102,10 +104,13 @@ def enviar(df):
     }
 
     requests.delete(delete_url, headers=headers_delete)
+    
 
     # 🔄 PREPARA DADOS (MANTIDO IGUAL)
     df = df.astype(object).where(pd.notnull(df), None)
     df.columns = [normalizar_coluna(c) for c in df.columns]
+
+
 
     # 🔥 LIMPEZA FORTE (CORRIGIDA)
     if "om" in df.columns and "oficina" in df.columns:
@@ -187,8 +192,8 @@ with st.sidebar:
 
     if not st.session_state.logado:
 
-        user = st.text_input("Usuário")
-        senha = st.text_input("Senha", type="password")
+        user = st.text_input("Usuário",autocomplete = 'off')
+        senha = st.text_input("Senha", type="password",autocomplete = "password")
 
         if st.button("Entrar no sistema"):
             if user in USUARIOS and USUARIOS[user] == senha:
@@ -254,9 +259,9 @@ with c_logo:
 # ================= FILTROS =================
 c1,c2,c3=st.columns(3)
 
-setor=c1.multiselect("Setor",sorted(df.SETOR.dropna().unique()))
-oficina=c2.multiselect("Oficina",sorted(df.OFICINA.dropna().unique()))
-safra=c3.multiselect("Safra",sorted(df.SAFRA.unique()),default=[sorted(df.SAFRA.unique())[-1]])
+setor=c1.multiselect("Setor",sorted(df.SETOR.dropna().unique()),placeholder = "Selecione o Setor")
+oficina=c2.multiselect("Oficina",sorted(df.OFICINA.dropna().unique()),placeholder = "Selecione Oficina")
+safra=c3.multiselect("Safra",sorted(df.SAFRA.unique()),default=[sorted(df.SAFRA.unique())[-1]],placeholder = "Selecione a Safra")
 
 if setor: df=df[df.SETOR.isin(setor)]
 if oficina: df=df[df.OFICINA.isin(oficina)]
@@ -268,7 +273,7 @@ if st.session_state.logado:
     st.sidebar.markdown("### 🔎 Filtros")
 
     status_user=st.sidebar.multiselect("Status Usuário",sorted(df.STATUS_USUARIO.dropna().unique()))
-    efet=st.sidebar.multiselect("Efetuada",sorted(df.EFETUADA_MANUTENCAO.dropna().unique()))
+    efet=st.sidebar.multiselect("Manutenção Efetuada",sorted(df.EFETUADA_MANUTENCAO.dropna().unique()))
     defeito=st.sidebar.multiselect("Defeito",sorted(df.DEFEITO.dropna().unique()))
     causa=st.sidebar.multiselect("Causa",sorted(df.CAUSA.dropna().unique()))
     critic=st.sidebar.multiselect("Criticidade",sorted(df.CRITICIDADE.dropna().unique()))
@@ -381,13 +386,20 @@ with b2:
     base["COR"] = ["#2E7D32" if i==0 else "#A5D6A7" for i in range(len(base))]
 
     chart = alt.Chart(base).mark_bar(
-        cornerRadiusTopLeft=8,
-        cornerRadiusBottomLeft=8
-    ).encode(
-        y=alt.Y("DEFEITO:N",sort="-x",axis=alt.Axis(labelLimit=300)),
-        x="QTD:Q",
-        color=alt.Color("COR:N", scale=None)
-    )
+    cornerRadiusTopLeft=8,
+    cornerRadiusBottomLeft=8
+).encode(
+    y=alt.Y("DEFEITO:N", sort="-x", axis=alt.Axis(labelLimit=300)),
+    x=alt.X(
+        "QTD:Q",
+        axis=alt.Axis(labels=False, ticks=False, title=None)
+    ),
+    color=alt.Color("COR:N", scale=None),
+    tooltip=[
+        alt.Tooltip("DEFEITO:N", title="Defeito"),
+        alt.Tooltip("QTD:Q", title="Quantidade")
+    ]
+)
 
     text = chart.mark_text(
         align="left",
@@ -404,7 +416,7 @@ st.divider()
 # ================= TABELA =================
 tabela=df.copy()
 
-tabela["AGING"]=(datetime.now()-tabela["DATA"]).dt.days
+tabela["IDADE"]=(datetime.now()-tabela["DATA"]).dt.days
 
 tabela["STATUS"]=tabela["STATUS_PREDITIVA"].apply(lambda x:
     "🟢" if x=="Manutenção Executada"
@@ -417,7 +429,7 @@ tabela["PRIORIDADE"]=tabela["CRITICIDADE"].apply(lambda x:
     else "🟢 Normal")
 
 tabela=tabela[
-    ["OM","STATUS","OFICINA","DESCRICAO_LI","STATUS_PREDITIVA","DEFEITO","PRIORIDADE","AGING"]
+    ["DATA","OM","STATUS","OFICINA","DESCRICAO_LI","STATUS_PREDITIVA","DEFEITO","PRIORIDADE","IDADE"]
 ]
-
+tabela["DATA"] = tabela["DATA"].dt.strftime("%d/%m/%Y")
 st.dataframe(tabela,use_container_width=True)
