@@ -6,6 +6,8 @@ from datetime import datetime
 import unicodedata
 import io
 
+import pytz
+
 st.set_page_config(
     page_title="Rota Preditiva",
     page_icon="⚙️",
@@ -193,7 +195,10 @@ with st.sidebar:
 df=carregar()
 if df.empty: st.stop()
 
-st.caption(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+tz = pytz.timezone("America/Sao_Paulo")
+agora = datetime.now(tz)
+
+st.caption(f"Última atualização: {agora.strftime('%d/%m/%Y %H:%M:%S')}")
 
 # ================= HEADER =================
 c_title, c_logo = st.columns([8,1])
