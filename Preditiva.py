@@ -386,7 +386,7 @@ tabela["PRIORIDADE"]=tabela["CRITICIDADE"].apply(lambda x:
     else "🟢 Normal")
 
 tabela=tabela[
-    ["DATA","OM","STATUS","OFICINA","DESCRICAO_LI","STATUS_PREDITIVA","DEFEITO","PRIORIDADE","IDADE"]
+    ["DATA","OM","STATUS","OFICINA","DESCRICAO_LI","TEXTO_BREVE","STATUS_PREDITIVA","DEFEITO","PRIORIDADE","IDADE"]
 ]
 
 tabela["DATA"] = tabela["DATA"].dt.strftime("%d/%m/%Y")
