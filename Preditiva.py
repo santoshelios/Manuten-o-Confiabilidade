@@ -210,7 +210,8 @@ with c_title:
     """, unsafe_allow_html=True)
 
 with c_logo:
-    st.image("logo.png", width=70)
+    st.image("raizen_shell.png", width=200)
+   
 
 # ================= FILTROS =================
 c1,c2,c3=st.columns(3)
