@@ -4,6 +4,7 @@ import altair as alt
 import requests
 from datetime import datetime
 import unicodedata
+import io
 
 st.set_page_config(
     page_title="Rota Preditiva",
@@ -14,7 +15,8 @@ st.set_page_config(
 # ================= LOGIN =================
 USUARIOS = {
     "admin": "1234",
-    "analista": "1234"
+    "analista": "1234",
+    "leandro.sales": "dalevi"
 }
 
 if "logado" not in st.session_state:
@@ -78,8 +80,6 @@ section[data-testid="stSidebar"] label{{
 SUPABASE_URL="https://kplsspnxemhzxfpzxbbl.supabase.co"
 SUPABASE_KEY="sb_publishable_M-_WauseWVAmnb1SIzOmQg_VLcc-O2e"
 
-
-
 # ================= FUNÇÕES =================
 def normalizar_coluna(col):
     col = unicodedata.normalize('NFKD', col).encode('ASCII','ignore').decode('ASCII')
@@ -94,7 +94,6 @@ def enviar(df):
         "Content-Type": "application/json"
     }
 
-    # 🔥 DELETE FORÇADO (AGORA FUNCIONA DE VERDADE)
     delete_url = f"{SUPABASE_URL}/rest/v1/rota_preditiva?id=gt.0"
 
     headers_delete = {
@@ -104,66 +103,18 @@ def enviar(df):
     }
 
     requests.delete(delete_url, headers=headers_delete)
-    
 
-    # 🔄 PREPARA DADOS (MANTIDO IGUAL)
     df = df.astype(object).where(pd.notnull(df), None)
     df.columns = [normalizar_coluna(c) for c in df.columns]
 
-
-
-    # 🔥 LIMPEZA FORTE (CORRIGIDA)
     if "om" in df.columns and "oficina" in df.columns:
-
         df["om"] = df["om"].astype(str).str.strip()
         df["oficina"] = df["oficina"].astype(str).str.strip().str.upper()
-
         df = df.drop_duplicates(subset=["om","oficina"], keep="last")
 
     if "data" in df.columns:
         df["data"] = pd.to_datetime(df["data"]).dt.strftime("%Y-%m-%d")
 
-    # 🚀 INSERT LIMPO
-    r = requests.post(url, json=df.to_dict("records"), headers=headers)
-
-    return r.status_code, r.text
-
-    # 🔥 LIMPA TABELA (FULL LOAD)
-    requests.delete(url, headers=headers)
-
-  # 🔄 PREPARA DADOS
-    df = df.astype(object).where(pd.notnull(df), None)
-    df.columns = [normalizar_coluna(c) for c in df.columns]
-
-# 🔥 LIMPEZA FORTE (resolve seu erro)
-    if "om" in df.columns and "oficina" in df.columns:
-
-    # padroniza
-        df["om"] = df["om"].astype(str).str.strip()
-        df["oficina"] = df["oficina"].astype(str).str.strip().str.upper()
-
-    # remove duplicados REAL
-    df = df.drop_duplicates(subset=["om","oficina"], keep="last")
-
-    # 🔍 validação extra (pra você ver o problema)
-    duplicados = df[df.duplicated(subset=["om","oficina"], keep=False)]
-
-    if not duplicados.empty:
-        st.error("⚠️ Duplicados encontrados após limpeza")
-        st.dataframe(duplicados)
-        return 400, "Duplicados persistentes"
-
-    # 🧠 VALIDAÇÃO EXTRA (DEBUG)
-    duplicados = df[df.duplicated(subset=["om","oficina"], keep=False)]
-    if not duplicados.empty:
-        st.error("⚠️ Ainda existem duplicados na planilha!")
-        st.dataframe(duplicados)
-        return 400, "Duplicados encontrados"
-
-    if "data" in df.columns:
-        df["data"] = pd.to_datetime(df["data"]).dt.strftime("%Y-%m-%d")
-
-    # 🚀 INSERE NOVAMENTE
     r = requests.post(url, json=df.to_dict("records"), headers=headers)
 
     return r.status_code, r.text
@@ -386,20 +337,20 @@ with b2:
     base["COR"] = ["#2E7D32" if i==0 else "#A5D6A7" for i in range(len(base))]
 
     chart = alt.Chart(base).mark_bar(
-    cornerRadiusTopLeft=8,
-    cornerRadiusBottomLeft=8
-).encode(
-    y=alt.Y("DEFEITO:N", sort="-x", axis=alt.Axis(labelLimit=300)),
-    x=alt.X(
-        "QTD:Q",
-        axis=alt.Axis(labels=False, ticks=False, title=None)
-    ),
-    color=alt.Color("COR:N", scale=None),
-    tooltip=[
-        alt.Tooltip("DEFEITO:N", title="Defeito"),
-        alt.Tooltip("QTD:Q", title="Quantidade")
-    ]
-)
+        cornerRadiusTopLeft=8,
+        cornerRadiusBottomLeft=8
+    ).encode(
+        y=alt.Y("DEFEITO:N", sort="-x", axis=alt.Axis(labelLimit=300)),
+        x=alt.X(
+            "QTD:Q",
+            axis=alt.Axis(labels=False, ticks=False, title=None)
+        ),
+        color=alt.Color("COR:N", scale=None),
+        tooltip=[
+            alt.Tooltip("DEFEITO:N", title="Defeito"),
+            alt.Tooltip("QTD:Q", title="Quantidade")
+        ]
+    )
 
     text = chart.mark_text(
         align="left",
@@ -431,5 +382,22 @@ tabela["PRIORIDADE"]=tabela["CRITICIDADE"].apply(lambda x:
 tabela=tabela[
     ["DATA","OM","STATUS","OFICINA","DESCRICAO_LI","STATUS_PREDITIVA","DEFEITO","PRIORIDADE","IDADE"]
 ]
+
 tabela["DATA"] = tabela["DATA"].dt.strftime("%d/%m/%Y")
+
+# 🔥 DOWNLOAD EXCEL
+buffer = io.BytesIO()
+
+with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+    tabela.to_excel(writer, index=False, sheet_name="Relatorio")
+
+buffer.seek(0)
+
+st.download_button(
+    label="📥 Baixar tabela (Excel)",
+    data=buffer,
+    file_name=f"relatorio_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
 st.dataframe(tabela,use_container_width=True)
