@@ -663,6 +663,7 @@ tabela["PRIORIDADE"] = tabela["CRITICIDADE"].apply(
     lambda x:
     "🔴 Crítico" if x=="A"
     else "⚠️ Alerta" if x=="B"
+    else "🔴 Crítico" if x=="S"
     else "🟢 Normal"
 )
 
